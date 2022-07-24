@@ -47,7 +47,7 @@ public class SimpleServer extends WebSocketServer {
     private static WebSocket UIconn;
     private static Map<String, WebSocket> sessionMap = new HashMap<>();
 
-    private static final int PORT = 8888;
+    private static final int PORT = 8887;
     private static final String HOST = "localhost";
 
     private static AgentController RobotAgent;

@@ -27,6 +27,7 @@ import org.apache.jena.reasoner.Reasoner;
 import org.apache.jena.reasoner.ReasonerRegistry;
 import org.java_websocket.WebSocket;
 import org.java_websocket.client.WebSocketClient;
+import org.semanticweb.owlapi.model.OWLOntologyCreationException;
 import org.semanticweb.owlapi.model.OWLOntologyStorageException;
 
 
@@ -50,7 +51,7 @@ public class RobotAgent extends Agent {
 
     public static State robotState = State.INIT;
 
-    Behaviour intention  = new Intention();
+//    Behaviour intention  = new Intention();
 
     Queue<String> productionTaskQueue = new LinkedList<String>();
     Queue<String> processTaskQueue = new LinkedList<String>();
@@ -126,7 +127,7 @@ public class RobotAgent extends Agent {
 //        addBehaviour(new CheckForMessages());
         addBehaviour(new getUIWSObj());
         addBehaviour(new Desire());
-        addBehaviour(intention);
+//        addBehaviour(intention);
 
 
     }
@@ -174,6 +175,10 @@ public class RobotAgent extends Agent {
                 intentions = kb.getIntentions();
             } catch (IOException | OWLOntologyStorageException e) {
                 throw new RuntimeException(e);
+            } catch (OWLOntologyCreationException e) {
+                throw new RuntimeException(e);
+            } finally {
+                done = true;
             }
 
             System.out.println("My intentions are: " + intentions);
@@ -215,7 +220,7 @@ public class RobotAgent extends Agent {
                         String id2 = kb.getIDofTask(last);
                         sendWSMessage(id2, "completed");
                     }
-                    ArrayList<String> currentTasks = kb.getCurrentProductionTasks(); // checks enabled transitions
+                    ArrayList<String> currentTasks = kb.getCurrentProductionTasksByShapes(); // checks enabled transitions
                     if (currentTasks.size() > 0) {
                         System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] Current Tasks: " + currentTasks);
 
@@ -247,6 +252,26 @@ public class RobotAgent extends Agent {
                     sendWSMessage(id,"performing");
 
                     last = productionTaskQueue.remove();
+
+                    // Succesfully Complete
+
+                    if(true) {
+                        // Informing task is done, end of protocol
+                        ACLMessage requestMsg = new ACLMessage(ACLMessage.INFORM);
+                        requestMsg.addReceiver(new AID("Operator", AID.ISLOCALNAME));
+                        requestMsg.setSender(myAgent.getAID());
+                        requestMsg.setProtocol(FIPANames.InteractionProtocol.FIPA_PROPOSE);
+                        requestMsg.setContent("Task "  + targetProdTask2 + " performed successfully");
+                        requestMsg.setConversationId("Propose_" + targetProdTask2);
+                        String infMsg = kb.insertACLMessage(requestMsg);
+                        send(requestMsg);
+                        // ?? WHY IS THIS NOT WORKING?
+                        kb.addInformMessageToContract(infMsg);
+                    }
+                    // Failed to perform
+
+
+
                     kb.updateTaskExecution(last); //fires a transition
                     robotState = State.IDLE;
                     block(3000);
@@ -298,6 +323,7 @@ public class RobotAgent extends Agent {
 
                     }
                     block();
+
 //                    restart();
                     break;
 
@@ -319,7 +345,7 @@ public class RobotAgent extends Agent {
                         String id1 = kb.getIDofTask(productionTaskQueue.peek());
                         System.out.println("Planned: " + id1);
                         sendWSMessage(id1,"planned");
-                        intention.restart();
+                        addBehaviour( new Intention());
                     }
 
                     else {
@@ -343,8 +369,6 @@ public class RobotAgent extends Agent {
             return false;
         }
     };
-
-
 
 //    class CheckForMessages extends CyclicBehaviour {
 //        @Override

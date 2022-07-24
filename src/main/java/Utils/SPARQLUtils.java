@@ -3,7 +3,7 @@ package Utils;
 import org.apache.jena.query.*;
 import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.Resource;
-import org.apache.jena.update.UpdateExecution;
+//import org.apache.jena.update.UpdateExecution;
 import org.apache.jena.update.UpdateFactory;
 import org.apache.jena.update.UpdateRequest;
 

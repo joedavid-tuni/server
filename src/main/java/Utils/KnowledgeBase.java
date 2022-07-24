@@ -5,6 +5,8 @@ import com.github.owlcs.ontapi.Ontology;
 import com.github.owlcs.ontapi.OntologyManager;
 import jade.core.AID;
 import jade.lang.acl.ACLMessage;
+import openllet.owlapi.OpenlletReasoner;
+import openllet.owlapi.OpenlletReasonerFactory;
 import org.apache.commons.io.FileUtils;
 import org.apache.jena.atlas.iterator.Iter;
 //import org.apache.jena.fuseki.main.FusekiServer;
@@ -34,10 +36,16 @@ import org.apache.jena.util.PrintUtil;
 import org.semanticweb.owlapi.apibinding.OWLManager;
 import org.semanticweb.owlapi.io.RDFXMLOntologyFormat;
 import org.semanticweb.owlapi.model.*;
+import org.semanticweb.owlapi.model.parameters.OntologyCopy;
+import org.semanticweb.owlapi.reasoner.InferenceType;
 import org.semanticweb.owlapi.reasoner.NodeSet;
 import org.semanticweb.owlapi.reasoner.OWLReasoner;
 import org.semanticweb.owlapi.reasoner.OWLReasonerFactory;
 import org.semanticweb.owlapi.reasoner.structural.StructuralReasonerFactory;
+import org.semanticweb.owlapi.util.InferredAxiomGenerator;
+import org.semanticweb.owlapi.util.InferredClassAssertionAxiomGenerator;
+import org.semanticweb.owlapi.util.InferredOntologyGenerator;
+
 
 import java.io.*;
 import java.net.URI;
@@ -98,7 +106,7 @@ public class KnowledgeBase {
 //        fusekiServer.stop();
 //    }
 
-   public ArrayList<String> getCurrentProductionTasks(){
+   public ArrayList<String> getCurrentProductionTasksByShapes(){
 
         //returns all enabled transitions
         ArrayList<String> currentProductionTasks= new ArrayList<String>();
@@ -280,7 +288,21 @@ public class KnowledgeBase {
 //        knowledgeBase.commit();
 //        knowledgeBase.end();
 //    }
+    public void addInformMessageToContract(String infMsg) {
 
+        knowledgeBase.begin(TxnType.WRITE);
+        System.out.println("ADDING INFORM: "+ infMsg);
+
+        // get the contract where the convid of msg belongs to and add the msg as part of the contract
+
+        String query = su.getPrefixes("camo", "DUL") + " INSERT {?con DUL:hasPart camo:"+infMsg+"} WHERE {camo:"+infMsg+" camo:conversation_id ?convID. "+
+                "?msg camo:conversation_id ?convID. ?con DUL:hasPart ?msg.}";
+        UpdateRequest uReq = UpdateFactory.create(query);
+        UpdateExecution.dataset(knowledgeBase).update(uReq).execute();
+
+        knowledgeBase.commit();
+        knowledgeBase.end();
+    }
     public void addMessagesToContract(ArrayList<String> msgNames) {
 
         knowledgeBase.begin(TxnType.WRITE);
@@ -302,7 +324,7 @@ public class KnowledgeBase {
 
 
         for (String msg: msgNames){
-            query = su.getPrefixes("camo") + " INSERT DATA {camo:"+conName+" camo:hasPart camo:"+msg+"}";
+            query = su.getPrefixes("camo","DUL") + " INSERT DATA {camo:"+conName+" DUL:hasPart camo:"+msg+"}";
             uReq = UpdateFactory.create(query);
             UpdateExecution.dataset(knowledgeBase).update(uReq).execute();
         }
@@ -332,7 +354,7 @@ public class KnowledgeBase {
 
         //Add Messages to contract
         for (String msg: msgs){
-            query = su.getPrefixes("camo") + " INSERT DATA {camo:"+conName+" camo:hasPart camo:"+msg+"}";
+            query = su.getPrefixes("camo","DUL") + " INSERT DATA {camo:"+conName+" DUL:hasPart camo:"+msg+"}";
             uReq = UpdateFactory.create(query);
             UpdateExecution.dataset(knowledgeBase).update(uReq).execute();
         }
@@ -641,7 +663,7 @@ public class KnowledgeBase {
         }
     }
 
-    public ArrayList<String> getIntentions() throws IOException, OWLOntologyStorageException {
+    public ArrayList<String> getIntentions() throws IOException, OWLOntologyStorageException, OWLOntologyCreationException {
         ArrayList<String> instances = new ArrayList<>();
 
         knowledgeBase.begin(TxnType.READ_PROMOTE);
@@ -661,43 +683,109 @@ public class KnowledgeBase {
         // ONTAPI worked in isolated project (see testOWLAPI>testONTAPI.java). The alternate, using streams to convert
         // jena OntModel to OWLAPI Ontology works.)
 
+        // CONSIDERING WORK WITH JENA ITSELF VIA OPENLLET https://github.com/Galigator/openllet, IT COULD BE FASTER AND
+        // OF COURSE DOESNT REQUIRE CONVERTING TO OWLAPI
+
 //        OntologyManager manager = OntManagers.createManager();
 //        Ontology ontology = manager.addOntology(ontmodel.getGraph());
 ////        Ontology ontology = manager.addOntology(knowledgeBase.asDatasetGraph().getDefaultGraph());
 ////        OWLReasonerFactory reasonerFactory1 = new StructuralReasonerFactory();
-        OWLReasonerFactory reasonerFactory2 = new org.semanticweb.HermiT.Reasoner.ReasonerFactory();
 
-//        //DEBUG: INSPECT THE ONTOLOGY BY OUTPUTTING TO FILE (OWLAPI)
-//        File file = new File("currModel"+String.valueOf(++i)+".owl");
-//        System.out.println("Document IRI" + manager.getOntologyDocumentIRI(ontology));
-//        manager.saveOntology(ontology, IRI.create(file.toURI()));
-//
+
 //        OWLReasoner reasoner1 = reasonerFactory2.createReasoner(ontology);
         OWLOntology ontology = getOWLOntology(ontModel); // using piped streams
 
+//DEBUG: INSPECT THE ONTOLOGY BY OUTPUTTING TO FILE (OWLAPI)
+        OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
+//        File file = new File("currModel"+String.valueOf(++i)+".owl");
+//        RDFXMLOntologyFormat rdfxmlOntologyFormat = new RDFXMLOntologyFormat();
+//        manager.setOntologyFormat(ontology,rdfxmlOntologyFormat);
+////        System.out.println("Document IRI" + manager.getOntologyDocumentIRI(ontology));
+//        manager.saveOntology(ontology, IRI.create(file.toURI()));
+//
+
         knowledgeBase.begin(TxnType.READ);
 
-        OWLReasoner reasoner = reasonerFactory2.createReasoner(ontology);
 
-        reasoner.precomputeInferences();
+        OpenlletReasoner reasoner_openllet = OpenlletReasonerFactory.getInstance().createReasoner(ontology);
+
+//        OWLReasonerFactory reasonerFactory2 = new org.semanticweb.HermiT.Reasoner.ReasonerFactory();
+//        OWLReasoner reasoner_hermit = reasonerFactory2.createReasoner(ontology);
+
+        long startTime = System.currentTimeMillis();
+        reasoner_openllet.precomputeInferences(InferenceType.CLASS_ASSERTIONS);
+//        reasoner_hermit.precomputeInferences(InferenceType.CLASS_ASSERTIONS);
+        long elapsedTime = System.currentTimeMillis() - startTime;
+        System.out.println("Inference Time: "+ elapsedTime/1000.0 + "s.");
+
+        List<InferredAxiomGenerator<? extends OWLAxiom>> gens = new ArrayList<InferredAxiomGenerator<? extends OWLAxiom>>();
+        gens.add(new InferredClassAssertionAxiomGenerator());
+
+        OWLOntology infOnt = manager.createOntology(); // temporary fresh ontology to store inferred axioms alone
+
+        InferredOntologyGenerator iog = new InferredOntologyGenerator(reasoner_openllet, gens); //choose the right reasoner
+        startTime = System.currentTimeMillis();
+        iog.fillOntology(manager.getOWLDataFactory(),infOnt);
+        elapsedTime = System.currentTimeMillis() - startTime;
+        System.out.println("Time to create ontology: "+ elapsedTime/1000.0 + "s.");
 
 
-        boolean consistent = reasoner.isConsistent();
+
+
+//        OWLDataFactory factory = manager.getOWLDataFactory();
+////        IRI iri = IRI.create("https://joedavid91.github.io/ontologies/camo/product");
+//        OWLOntology infOWLOnt= manager.createOntology();
+//        System.out.println("Before Filling Ontology");
+//        gen.fillOntology(factory,infOWLOnt);
+//        System.out.println("After Filling Ontology");
+
+        boolean consistent = reasoner_openllet.isConsistent();
         System.out.println("Consistent: " + consistent);
 
-        OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
-        OWLDataFactory factory = manager.getOWLDataFactory();
-        OWLClass Intention  = factory.getOWLClass("https://joedavid91.github.io/ontologies/camo/product#Intention");
-        NodeSet<OWLNamedIndividual> intentionNodeSet = reasoner.getInstances(Intention,true);
-        Set<OWLNamedIndividual> intentions = intentionNodeSet.getFlattened();
 
-        for (OWLNamedIndividual intention: intentions){
-            instances.add(intention.toString());
+
+ //        OLDWAY to query owlapi ontology programmatically replaced with a sparql solution (ONTAPI-SPARQL)
+ //        because inferring intentions is not possible with reaosner alone due to OWA and so you opted
+ //         for a solution with inference accompanied by a simple sparql query  (do you want to relpace Intention with goals)
+//        OWLDataFactory factory = manager.getOWLDataFactory();
+//        OWLClass Intention  = factory.getOWLClass("https://joedavid91.github.io/ontologies/camo/product#Intention");
+//        NodeSet<OWLNamedIndividual> intentionNodeSet = reasoner.getInstances(Intention,true);
+//        Set<OWLNamedIndividual> intentions = intentionNodeSet.getFlattened();
+
+        String queryString= su.getPrefixes("camo") + " SELECT ?int WHERE { "+
+                " ?int a camo:Intention." +
+                " FILTER NOT EXISTS { " +
+                "?int a camo:NonAchievableDesire. "+
+                "} "+
+                "}";
+
+        Query query = QueryFactory.create(queryString);
+
+//        converting OWLAPI ontology to ONT-API Ontology to run sparql
+        OntologyManager _manager = OntManagers.createManager();
+        System.out.println("Before COpu");
+        Ontology ontOntology = _manager.copyOntology(infOnt, OntologyCopy.DEEP); //make sure its the ontology containing the inferred axioms
+        System.out.println("AfterCopy");
+        try(QueryExecution queryExecution = QueryExecutionFactory.create(query, ontOntology.asGraphModel())) {
+            ResultSet res = queryExecution.execSelect();
+            while (res.hasNext()) {
+//                System.out.println(res.next());
+                QuerySolution sol = res.next();
+
+                Resource intention = sol.getResource("int");
+                if (intention != null) instances.add(intention.getLocalName());
+            }
+
+//        }
+//        for (OWLNamedIndividual intention: intentions){
+//            instances.add(intention.toString());
+//        }
         }
-
         knowledgeBase.end();
         return instances;
     }
+
+
 }
 
 // Code to print Jena Models to file
