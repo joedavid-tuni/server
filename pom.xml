@@ -50,12 +50,12 @@
             <version>4.5.0</version>
             <type>pom</type>
         </dependency>
-<!--        <dependency>-->
-<!--            <groupId>org.apache.jena</groupId>-->
-<!--            <artifactId>jena-fuseki-main</artifactId>-->
-<!--            <version>4.5.0</version>-->
-<!--            &lt;!&ndash;you need atleast 4.3 for UpdateExecution in SPARQL Utils            &ndash;&gt;-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>org.apache.jena</groupId>
+            <artifactId>jena-fuseki-main</artifactId>
+            <version>4.5.0</version>
+            <!--you need atleast 4.3 for UpdateExecution in SPARQL Utils            -->
+        </dependency>
         <dependency>
             <groupId>net.sourceforge.owlapi</groupId>
             <artifactId>org.semanticweb.hermit</artifactId>

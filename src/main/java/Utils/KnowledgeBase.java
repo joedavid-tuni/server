@@ -10,6 +10,7 @@ import openllet.owlapi.OpenlletReasonerFactory;
 import org.apache.commons.io.FileUtils;
 import org.apache.jena.atlas.iterator.Iter;
 //import org.apache.jena.fuseki.main.FusekiServer;
+import org.apache.jena.fuseki.main.FusekiServer;
 import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
 import org.apache.jena.ontology.OntModel;
@@ -34,6 +35,7 @@ import org.apache.jena.update.UpdateProcessor;
 import org.apache.jena.update.UpdateRequest;
 import org.apache.jena.util.PrintUtil;
 import org.semanticweb.owlapi.apibinding.OWLManager;
+import org.semanticweb.owlapi.formats.TurtleDocumentFormat;
 import org.semanticweb.owlapi.io.RDFXMLOntologyFormat;
 import org.semanticweb.owlapi.model.*;
 import org.semanticweb.owlapi.model.parameters.OntologyCopy;
@@ -64,26 +66,29 @@ public class KnowledgeBase {
     private int i = 0;
     private final SPARQLUtils su = new SPARQLUtils();
 
+    private Integer portFuseki;
+
 //    private Reasoner reasoner = ReasonerRegistry.getOWLReasoner();
 //    private Reasoner reasoner = PelletReasonerFactory.theInstance().create();
 //    private Reasoner reasoner2 = PelletReasonerFactory.theInstance().create();
 
-//    FusekiServer fusekiServer;
+    FusekiServer fusekiServer;
 
-    public KnowledgeBase(String gPath, String dBaseDir) throws IOException {
+    public KnowledgeBase(String gPath, String dBaseDir, Integer portFuseki) throws IOException {
 //        String dBaseDir = "/home/robolab/Documents/Dataset";
         File dir = new File(dBaseDir);
         FileUtils.cleanDirectory(dir);
 
         this.knowledgeBase = TDBFactory.createDataset(dBaseDir);
         OntModel ontModel = ModelFactory.createOntologyModel(OntModelSpec.OWL_MEM);
-        System.out.println("Going to read");
         ontModel.read(gPath, "RDF/XML");
-        System.out.println("Finished Reading");
+
 
 //        reasoner.bind(ontModel.getGraph());
 //
         this.knowledgeBase.getDefaultModel().add(ontModel);
+        this.knowledgeBase.addNamedModel("https://joedavid91.github.io/ontologies/camo-named-graph/operator-intention", ontModel);
+        this.portFuseki = portFuseki;
 
     }
 
@@ -91,20 +96,58 @@ public class KnowledgeBase {
         return this.knowledgeBase.getDefaultModel();
     }
 
-//    public void initFuseki(){
-//        fusekiServer = FusekiServer.create()
-//                .enableCors(true)
-//                .port(3003)
-//                .add("/ds", knowledgeBase, true)
-//                .build();
-//        System.out.println("Starting Robot KB");
-//        fusekiServer.start();
-//    }
-//
-//    private void stopFusek(){
-//        System.out.println("Stopping Fuseki");
-//        fusekiServer.stop();
-//    }
+    public void initFuseki(){
+        fusekiServer = FusekiServer.create()
+                .enableCors(true)
+                .port(portFuseki)
+                .add("/ds", knowledgeBase, true)
+                .build();
+        System.out.println("Starting Fuseki on port " + portFuseki);
+        fusekiServer.start();
+    }
+
+    private void stopFusek(){
+        System.out.println("Stopping Fuseki");
+        fusekiServer.stop();
+    }
+
+    public ArrayList<String> getCurrentProductionTasksBySparql() {
+        ArrayList<String> currentProductionTasks = new ArrayList<String>();
+        knowledgeBase.begin(ReadWrite.READ);
+
+        try {
+            String qs1 = su.getPrefixes("camo") + """
+                    SELECT ?task1 ?id
+                        WHERE  {
+                                    ?task1 a camo:ProductionTask.
+                                    ?task1 camo:UID ?id.
+                                    ?state camo:includesActivities ?task1.
+                                    ?state camo:hasToken true.
+                        MINUS {
+                                    ?state1 camo:hasToken true.
+                                    ?state2 camo:hasToken false.
+                                    ?state1 camo:includesActivities ?task1.
+                                    ?state2 camo:includesActivities ?task2.
+                                    filter ((?task1=?task2))
+                                }
+                        }
+                    """;
+
+            try(QueryExecution qExec = QueryExecution.create(qs1,knowledgeBase)){
+                ResultSet rs = qExec.execSelect();
+                while(rs.hasNext()) {
+                    QuerySolution sol = rs.nextSolution();
+                    String prodTask = sol.getResource("?task1").getLocalName();
+                    String id = sol.getLiteral("?id").getString();
+                    if (prodTask!=null) currentProductionTasks.add(prodTask);
+                }
+            }
+            knowledgeBase.end();
+            return currentProductionTasks;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
    public ArrayList<String> getCurrentProductionTasksByShapes(){
 
@@ -157,6 +200,7 @@ public class KnowledgeBase {
         return  currentProductionTasks;
 
     }
+
 
     public String getIDofTask(String task){
 
@@ -372,11 +416,12 @@ public class KnowledgeBase {
       return convID;
     }
 
-    public boolean checkCapabilityOfProductionTask(String productionTask){
+    public ArrayList<String> checkCapabilityOfProductionTask(String productionTask){
 
         ArrayList<String> processTasks = getProcessTasksForProductionTask(productionTask);
         System.out.println("Process tasks for " + productionTask + ": " + processTasks);
 
+        ArrayList<String> inCapableProcessTasks = new ArrayList<>();
 
         String shapeDir="";
         Resource capClass = null;
@@ -447,6 +492,10 @@ public class KnowledgeBase {
                     isCapable = report.conforms() && isCapable; //not sure if this works but no errors are evident
 //                    }
 
+                    if(!report.conforms()){
+                        inCapableProcessTasks.add(processTask);
+                    }
+
                 }
                 else {
                     //TODO: for now return false, later see what exactly does not conform
@@ -492,7 +541,7 @@ public class KnowledgeBase {
         knowledgeBase.end();
 
 
-        return isCapable;
+        return inCapableProcessTasks;
 
     }
 
@@ -656,11 +705,92 @@ public class KnowledgeBase {
 
     }
 
+    public OntModel getOntModel(OWLOntology ontology){
+        OntModel ontModel = ModelFactory.createOntologyModel(OntModelSpec.OWL_MEM);
+
+        try (PipedInputStream is = new PipedInputStream(); PipedOutputStream os = new PipedOutputStream(is)) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        ontology.getOWLOntologyManager().saveOntology(ontology, new RDFXMLOntologyFormat(), os);
+                        os.close();
+                    } catch (OWLOntologyStorageException | IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }).start();
+            ontModel.read(is, null, "RDF/XML");
+            return ontModel;
+        } catch (Exception e) {
+            throw new RuntimeException("Could not convert OWL API ontology to JENA API model.", e);
+        }
+    }
+
     public void printStatements(Model m, Resource s, Property p, Resource o) {
         for (StmtIterator i = m.listStatements(s,p,o); i.hasNext(); ) {
             Statement stmt = i.nextStatement();
             System.out.println(" - " + PrintUtil.print(stmt));
         }
+    }
+
+    public void updateIntention() throws OWLOntologyCreationException, IOException, OWLOntologyStorageException {
+        knowledgeBase.begin(TxnType.READ_PROMOTE);
+
+        // get the intention named model
+        OntModel ontModel = ModelFactory.createOntologyModel(OntModelSpec.OWL_MEM, knowledgeBase.getDefaultModel());
+        knowledgeBase.commit();
+        knowledgeBase.end();
+
+
+
+        // convert to OWLOntology and run inference
+
+        OWLOntology ontology = getOWLOntology(ontModel);
+        OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
+
+        //DEBUG: INSPECT THE ONTOLOGY BY OUTPUTTING TO FILE (OWLAPI)
+//        File file = new File("currModel"+String.valueOf(++i)+".rdf");
+//        RDFXMLOntologyFormat rdfxmlOntologyFormat = new RDFXMLOntologyFormat();
+//        manager.setOntologyFormat(ontology,rdfxmlOntologyFormat);
+//        manager.saveOntology(ontology, IRI.create(file.toURI()));
+
+        knowledgeBase.begin(TxnType.READ_PROMOTE);
+
+
+        OpenlletReasoner reasoner_openllet = OpenlletReasonerFactory.getInstance().createReasoner(ontology);
+
+        long startTime = System.currentTimeMillis();
+        reasoner_openllet.precomputeInferences(InferenceType.CLASS_ASSERTIONS);
+        long elapsedTime = System.currentTimeMillis() - startTime;
+        System.out.println("[Operator]  Inference Time: "+ elapsedTime/1000.0 + "s.");
+
+        List<InferredAxiomGenerator<? extends OWLAxiom>> gens = new ArrayList<InferredAxiomGenerator<? extends OWLAxiom>>();
+        gens.add(new InferredClassAssertionAxiomGenerator());
+
+        OWLOntology infOnt = manager.createOntology(); // temporary fresh ontology to store inferred axioms alone
+
+        InferredOntologyGenerator iog = new InferredOntologyGenerator(reasoner_openllet, gens); //choose the right reasoner
+        startTime = System.currentTimeMillis();
+        iog.fillOntology(manager.getOWLDataFactory(),infOnt);
+        elapsedTime = System.currentTimeMillis() - startTime;
+        System.out.println("[Operator] Time to create ontology: "+ elapsedTime/1000.0 + "s.");
+
+        // Convert back to Jena ONTModel and add to intention named model
+
+        OntModel ontModel1 = getOntModel(infOnt);
+
+//        //DEBUG: INSPECT THE ONTOLOGY BY OUTPUTTING TO FILE (JENA)
+//        String defaultModelFileName = "currModel"+String.valueOf(++i)+".ttl";
+//        FileWriter currOut = new FileWriter(defaultModelFileName);
+//        ontModel1.writeAll(currOut, "TTL");
+//        currOut.close();
+
+        // get the intention named model
+        knowledgeBase.replaceNamedModel("https://joedavid91.github.io/ontologies/camo-named-graph/operator-intention", ontModel1);
+        knowledgeBase.commit();
+        knowledgeBase.end();
+
     }
 
     public ArrayList<String> getIntentions() throws IOException, OWLOntologyStorageException, OWLOntologyCreationException {
@@ -763,9 +893,7 @@ public class KnowledgeBase {
 
 //        converting OWLAPI ontology to ONT-API Ontology to run sparql
         OntologyManager _manager = OntManagers.createManager();
-        System.out.println("Before COpu");
         Ontology ontOntology = _manager.copyOntology(infOnt, OntologyCopy.DEEP); //make sure its the ontology containing the inferred axioms
-        System.out.println("AfterCopy");
         try(QueryExecution queryExecution = QueryExecutionFactory.create(query, ontOntology.asGraphModel())) {
             ResultSet res = queryExecution.execSelect();
             while (res.hasNext()) {
