@@ -14,7 +14,9 @@ public class UIMessage {
     private String in_reply_to;
     private String message;
 
-    public UIMessage(String communicativeAct, String sender, String message, String interactionProtocol, String conversation_id, String reply_with, String in_reply_to) {
+    private String loopbackcontent;
+
+    public UIMessage(String communicativeAct, String sender, String message, String interactionProtocol, String conversation_id, String reply_with, String in_reply_to, String loopbackcontent) {
         this.communicativeAct = communicativeAct;
         this.sender = sender;
         this.interactionProtocol = interactionProtocol;
@@ -22,6 +24,8 @@ public class UIMessage {
         this.reply_with = reply_with;
         this.in_reply_to = in_reply_to;
         this.message = message;
+        this.loopbackcontent = loopbackcontent;
+
     }
 
 

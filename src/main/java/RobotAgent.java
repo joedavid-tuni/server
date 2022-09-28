@@ -1,8 +1,7 @@
 import SocketMessage.GeneralMessage;
 import SocketMessage.VA2ACommunication;
-import Utils.KnowledgeBase;
-import Utils.MessageUtils;
-import Utils.SPARQLUtils;
+import Utils.*;
+import com.github.andrewoma.dexx.collection.ArrayLists;
 import com.github.jsonldjava.utils.JsonUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -27,28 +26,29 @@ import org.apache.jena.rdf.model.InfModel;
 import org.apache.jena.rdf.model.Model;
 import org.apache.jena.reasoner.Reasoner;
 import org.apache.jena.reasoner.ReasonerRegistry;
+import org.apache.jena.riot.Lang;
+import org.apache.jena.riot.RDFDataMgr;
 import org.java_websocket.WebSocket;
 import org.java_websocket.client.WebSocketClient;
 import org.semanticweb.owlapi.model.OWLOntologyCreationException;
 import org.semanticweb.owlapi.model.OWLOntologyStorageException;
 
 
+import javax.mail.Message;
 import java.awt.*;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.Objects;
-import java.util.Queue;
+import java.net.URISyntaxException;
+import java.util.*;
 
 enum State{IDLE, PERFORMING_TASK, CHECKING_CAPABILITY, COMMUNICATION, INIT}
-enum INTState{INIT, EXECUTE}
+enum INTState{INIT, FETCH, CHECK_CAPABILITY, PERFORM_TASK, COLLABORATE, COMMUNICATE}
 
 public class RobotAgent extends Agent {
 
     WebSocket UIconn = null;
     Gson gson = new Gson();
 
-    KnowledgeBase kb = new KnowledgeBase("/home/robolab/Downloads/productCapRv2.rdf","/home/robolab/Documents/DatasetRobot", 3002);
+    KnowledgeBase kb = new KnowledgeBase("/home/robolab/Downloads/productCapRv5.rdf","/home/robolab/Documents/DatasetRobot", 3002, ConsoleColors.robot_kb());
 
     private final MessageUtils mu = new MessageUtils();
 
@@ -71,14 +71,14 @@ public class RobotAgent extends Agent {
 
     public void setup() {
         // write your code here
-        System.out.println("Hello from Robot Jade Agent");
-        System.out.println("My local name is " + getAID().getLocalName());
-        System.out.println("My GUID is " + getAID().getName());
+        System.out.println(ConsoleColors.robot_format() + "Hello from Robot Jade Agent" + ConsoleColors.RESET);
+        System.out.println(ConsoleColors.robot_format() + "My local name is " + getAID().getLocalName() + ConsoleColors.RESET);
+        System.out.println(ConsoleColors.robot_format() + "My GUID is " + getAID().getName() + ConsoleColors.RESET);
 
 
 
         // Initialize Fuseki
-//        kb.initFuseki();
+        kb.initFuseki();
 
         setEnabledO2ACommunication(true, 0);
 
@@ -151,7 +151,7 @@ public class RobotAgent extends Agent {
             if (UIconn != null) {
 //                UIconn = (WebSocket) myAgent.getO2AObject();
 
-                System.out.println("[Robot getUIWSObj Beh] Got UI WS Object");
+                System.out.println(ConsoleColors.robot_format() +"[Robot getUIWSObj Beh] Got UI WS Object" + ConsoleColors.RESET);
                 UIconn.send("{\"message\" : \"[Robot Agent] UI Websocket connection established\"}");
 
                 addBehaviour(new CheckForO2A());
@@ -195,14 +195,25 @@ public class RobotAgent extends Agent {
         //  defined in contract after needed inter-agent communication.
         private boolean done = false;
         public String productionTask;
+        public Queue<String> processTaskQueue = new LinkedList<String>();
 
-        public Intention(String productionTask) {
+        MessageTemplate messageTemplate;
+
+        private boolean joint;
+
+        ArrayList<TaskAndReport> incapableTasks;
+        ArrayList<String> noActionForTaskTasks;
+
+        public Intention(String productionTask, boolean joint) {
             this.productionTask = productionTask;
+            this.joint = joint;
         }
+
 
         @Override
         public void action(){
-            System.out.println("\n~~~~~~~[" + myAgent.getAID().getLocalName() + " Agent] Intention "+intentionState +"~~~~~~~~~~~~~~~~");
+            System.out.println();
+            System.out.println(ConsoleColors.robot_heading_whtbck() + "~~~~~~~[" + myAgent.getAID().getLocalName() + " Agent Behaviour Intention ("+productionTask+")]  "+intentionState +"~~~~~~~" + ConsoleColors.RESET);
             // get inferred model
             // Check for instances of Intentions to perform them
             switch (intentionState){
@@ -210,41 +221,177 @@ public class RobotAgent extends Agent {
 
                     //Check if valid intention here.
 
-
                     ArrayList<String> intentions = null;
                     try {
                         intentions = kb.getIntentions();
-                        System.out.println("Computed Intentions: " + intentions);
+                        System.out.println(ConsoleColors.robot_format() + "Computed Intentions: " + intentions + ConsoleColors.RESET);
                         if(intentions.contains(this.productionTask)){
-                            intentionState = INTState.EXECUTE;
+                            intentionState = INTState.FETCH;
+//                            done=true;
+                        }
+                        else{
+                            System.out.println("Not an Intention");
                         }
                     } catch (IOException | OWLOntologyStorageException | OWLOntologyCreationException e) {
                         throw new RuntimeException(e);
                     }
                     break;
 
-                case EXECUTE:
+                case FETCH:
                     // fetch current process task
 
-                    // check if its independent CM or not
+                    System.out.println(ConsoleColors.robot_format() + "Fetching Process Tasks " + ConsoleColors.RESET);
+                    ArrayList<String> processTasks = kb.getActiveProcesses(productionTask);
+                    System.out.println(ConsoleColors.robot_format() + "Process Tasks: " + processTasks +ConsoleColors.RESET);
 
-                    // if independent execute
+                    if(processTasks.size() > 0){
 
-                    //if collaborative initiate communications
+                        for(String processTask : processTasks){
+                            if (!processTaskQueue.contains(processTask)) {
+                                processTaskQueue.add(processTask);
+                            }
+
+                        }
+                        intentionState = INTState.CHECK_CAPABILITY;
+                    } else{
+                        System.out.println("No active processes");
+                        done=true;
+                    }
+
+
+                    break;
+
+                case CHECK_CAPABILITY:
+
+                    // get the process
+
+                    String process = processTaskQueue.peek();
+                    // an ArrayList even though one element to be compatible to check length in the case there are none
+                    System.out.println(ConsoleColors.robot_format() + "Checking Capability to carry out process" + ConsoleColors.RESET);
+                    incapableTasks = kb.checkCapabilityOfProcess(process);
+                    try {
+                        System.out.println(ConsoleColors.robot_format() + "Checking Actions of Process: " + process + ConsoleColors.RESET);
+                        noActionForTaskTasks = kb.checkForActions(process);
+                    } catch (URISyntaxException e) {
+                        throw new RuntimeException(e);
+                    }
 
 
 
+                    System.out.println(ConsoleColors.robot_format() + "Deciding between performing task alone or collaborate" + ConsoleColors.RESET);
+                    if(incapableTasks.size()==0){
+                        System.out.println(ConsoleColors.robot_format() + "Decided Perform" + ConsoleColors.RESET);
+                        intentionState = INTState.PERFORM_TASK;
+                    }
+                    else {
+                        System.out.println(ConsoleColors.robot_format() + "Decided Collaborate" + ConsoleColors.RESET);
+                        intentionState = INTState.COLLABORATE;
+                    }
+                    break;
+
+                case PERFORM_TASK:
+
+                    //temp
 
 
-//                        String intentionToPursue = intentionsQueue.remove();
-//
-//                        System.out.println("\n\nPerforming Intention " + intentionToPursue);
+                    try {
+                        kb.writeToFile("planDebug_"+processTaskQueue.peek() +".rdf");
+                        kb.updateNamedGraph();
+//                        kb.debug();
+
+                    } catch (OWLOntologyCreationException | IOException e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    System.out.println(ConsoleColors.robot_format() + "Performing task: " + processTaskQueue.peek() + ConsoleColors.RESET);
+
+                    // todo: if all actions of the plan are executed
+
+                    boolean allActionsExecuted = false;
+                    try {
+                        allActionsExecuted = kb.areActionsExecuted(processTaskQueue.peek());
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+
+
+                    if(allActionsExecuted){
+                        kb.updateTaskExecution(processTaskQueue.peek());
+                        processTaskQueue.remove();
+                        intentionState = INTState.FETCH;
+                    }
+
+                    // get the ActivePlan (the right one)
+
+                    // check if all actions in the plan exists for all tasks requirement in shapes
+
+                    //execute them in the right order and modality
+
+                    break;
+                case COLLABORATE:
+                    // get the caps that failed the validation
+
+                    System.out.println("Incapable Tasks " + incapableTasks);
+                    System.out.println("No Action Tasks " + noActionForTaskTasks);
+
+                    Model validationReportModel = incapableTasks.get(0).getReport().getModel();
+
+                    RDFDataMgr.write(System.out,validationReportModel, Lang.TTL);
+
+                    // get the primitive tasks to be executed in order and store them in array list.
+                        // get the SHACL graph
+                        // query the graph
+
+                    // pop each one and check
+
+                    // Modality, if independent and capable and has action > PERFORM
+
+                    // Modality, if synchronous and all actions capable and has action >PERFORM
+                    // Modality, if synchronous and not all actions capable and has action > COMMUNICATE
+
+                    // Modality, if sequential and all actions capable and has action > PERFORM
+                    // Modality, if sequential and not all actions capable and has action > COMMUNICATE
+
+
+                    // if it is either incapable or noaction task and inform operator to be done if so based on the modality
+                        // wait for inform messages from the operator that indicates operator has done his/her part
+
+                    ACLMessage propMsg = new ACLMessage(ACLMessage.PROPOSE);
+                    propMsg.addReceiver(new AID("Operator", AID.ISLOCALNAME));
+                    propMsg.setSender(myAgent.getAID());
+                    propMsg.setProtocol(FIPANames.InteractionProtocol.FIPA_PROPOSE);
+                    propMsg.setReplyWith("Collab_Process_" + processTaskQueue.peek() + "_Reply");
+                    propMsg.setConversationId("Collab_Process_" + processTaskQueue.peek());
+                    propMsg.setContent("Its time to do an agreed Collaboration, You should see the instructions on you left. Hit accept proposal when ready");
+
+                    send(propMsg);
+
+                    //TODO: throw open left drawer with required information  (type b left drawer)
+
+                    messageTemplate = MessageTemplate.and(MessageTemplate.MatchConversationId("Collab_Process_" + processTaskQueue.peek()),
+                            MessageTemplate.MatchPerformative(ACLMessage.ACCEPT_PROPOSAL));
+
+                    intentionState = INTState.COMMUNICATE;
+
+                    break;
+
+                case COMMUNICATE:
+
+
+                    ACLMessage comm = myAgent.receive(messageTemplate);
+
+                    if(comm !=null){
+                        System.out.println("Received accept proposal to do collaboration process immediately");
+
+                        intentionState = INTState.PERFORM_TASK;
+                    }
+
 
 
 
             }
 
-            block(3000);
+            block(500);
         }
 
         @Override
@@ -257,6 +404,7 @@ public class RobotAgent extends Agent {
     class Desire extends Behaviour {
         private MessageTemplate messageTemplate;
         private String last = null;
+        Map<String, ProcessTaskValidation> inCapableProcessTasks;
 
         private Intention currentIntention;
 
@@ -268,7 +416,8 @@ public class RobotAgent extends Agent {
 
         @Override
         public void action() {
-            System.out.println("\n~~~~~~~[" + myAgent.getAID().getLocalName() + " Agent] "+robotState+"~~~~~~~~~~~~~~~~");
+            System.out.println("");
+            System.out.println(ConsoleColors.robot_heading() + "~~~~~~~[" + myAgent.getAID().getLocalName() + " Agent Behaviour Desire ("+productionTaskQueue.peek()+")] "+robotState+"~~~~~~~" + ConsoleColors.RESET);
             switch (robotState) {
                 case INIT:
                     robotState = State.IDLE;
@@ -278,7 +427,6 @@ public class RobotAgent extends Agent {
                 case IDLE:
 
                     // Check if any task
-                    System.out.println("\n\nRobot in IDLE State");
                     if(last!=null) {
 //                        System.out.println("Last: " + last);
                         String id2 = kb.getIDofTask(last);
@@ -286,7 +434,7 @@ public class RobotAgent extends Agent {
                     }
                     ArrayList<String> currentTasks = kb.getCurrentProductionTasksByShapes(); // checks enabled transitions
                     if (currentTasks.size() > 0) {
-                        System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] Current Tasks: " + currentTasks);
+                        System.out.println(ConsoleColors.robot_format() + "[" + myAgent.getAID().getLocalName() + " Agent] Current Tasks: " + currentTasks + ConsoleColors.RESET);
 
                         // populate queue
                         for (String currentTask : currentTasks) {
@@ -301,13 +449,18 @@ public class RobotAgent extends Agent {
                     } else {
                         //handle no more tasks left
                         System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] No production Tasks");
+                        try {
+                            kb.writeToFile("planDebug.rdf");
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
                         block();
                     }
                     break;
 
-                case PERFORMING_TASK: // TODO: ADD A NEW BEHAVIOUR OF CLASS INTENTION AND DONT PROCEED UNTIL behaviour.done() returns true
+                case PERFORMING_TASK:
 
-                    System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] Checking if current intention is complete..");
+                    System.out.println(ConsoleColors.robot_format() + "[" + myAgent.getAID().getLocalName() + " Agent] Checking if current intention is complete.." +ConsoleColors.RESET);
 
                     if(currentIntention.done()){ // 31.07 You have decided to stick with the solution of waiting until each intention is
                         // done and to process productionTasks one-by-one because of the following reasons. (1) It can get overwhelming for
@@ -316,6 +469,7 @@ public class RobotAgent extends Agent {
                         // in parallel with the robot asking about new desires/proposals. It can be confusiong for the operator to maintain
                         // multiple parallel conversations about different things.
 //                   get ID of object from knowledge base
+                        System.out.println(ConsoleColors.robot_format()  + "Yes, intention is executed and complete, proceeding to inform operator" + ConsoleColors.RESET);
                         String id = kb.getIDofTask(currentIntention.productionTask);
 
                         // Prepare and send JSON object
@@ -338,7 +492,7 @@ public class RobotAgent extends Agent {
                     }
 
                     else{
-                        System.out.println("Not Done");
+                        System.out.println(ConsoleColors.robot_format() + "Not Done" + ConsoleColors.RESET);
                     }
 
                     // get ID of object from knowledge base
@@ -369,18 +523,22 @@ public class RobotAgent extends Agent {
 //
 //                    kb.updateTaskExecution(last); //fires a transition
 //                    robotState = State.IDLE;
-                    block(3000);
+                    block(500);
 //                    restart();
                     break;
 
                 case CHECKING_CAPABILITY:
-                    System.out.println("\n\nChecking Capability");
                     String targetProdTask1 = productionTaskQueue.peek();
 
                     //get Process Tasks for the target production Task
 
-                    ArrayList<String> inCapableProcessTasks = kb.checkCapabilityOfProductionTask(targetProdTask1);
-                    System.out.println("~~~~LENGTH = " + inCapableProcessTasks.size());
+                    inCapableProcessTasks = kb.checkCapabilityOfProductionTask(targetProdTask1);
+                    System.out.println(ConsoleColors.robot_format() + "Number of Incapable Process Tasks: " + inCapableProcessTasks.size() + ConsoleColors.RESET);
+                    ArrayList<String> temp = new ArrayList<>();
+
+                    for (ProcessTaskValidation ptv:inCapableProcessTasks.values()){
+                        temp.add(gson.toJson(ptv));
+                    }
 
                     //request permission from the operator
                     if(inCapableProcessTasks.size() == 0) {
@@ -404,6 +562,9 @@ public class RobotAgent extends Agent {
 //                                }
                             //handle reject (remove the task from queue)
                         });
+                        String id = kb.getIDofTask(productionTaskQueue.peek());
+                        String message = "{\"type\":\"show-process-plans\",\"values\":{\"id\":\""+id+"\",\"task\":\""+productionTaskQueue.peek()+"\"}}";
+                        UIconn.send(message);
 
                         String msgName = kb.insertACLMessage(requestMsg);
 //                        contract = kb.createContractForMessage(msgName);
@@ -419,6 +580,11 @@ public class RobotAgent extends Agent {
                     }
 
                     else {
+
+                        String id = kb.getIDofTask(productionTaskQueue.peek());
+                        String message = "{\"type\":\"show-process-plans\",\"values\":{\"id\":\""+id+"\",\"task\":\""+productionTaskQueue.peek()+"\"}}";
+                        UIconn.send(message);
+
                         // initiate collaborative activities and set different message template for communication block
                         System.out.println("InCapable Tasks are : " + inCapableProcessTasks);
 
@@ -428,8 +594,24 @@ public class RobotAgent extends Agent {
                         cfp.setSender(myAgent.getAID());
                         cfp.setProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET);
                         cfp.setReplyWith("Collab " + targetProdTask1 + " Reply");
-                        cfp.setContent(StringUtils.join(inCapableProcessTasks, ", "));
+                        cfp.setContent(StringUtils.join(temp, ", "));
+//                        cfp.setContent(new Gson().toJson(inCapableProcessTasks));
                         cfp.setConversationId("Collab_" + targetProdTask1);
+
+                        // TODO: throw the type a leftdrawer open to indicate which proces tasks of the prodution tasks
+
+                        ArrayList<String> idsOfIncProcesses = new ArrayList<>();
+                        for(ProcessTaskValidation ptv:inCapableProcessTasks.values()){
+//                            ProcessTaskValidation ptv= gson.fromJson(task, ProcessTaskValidation.class);
+                            String incProcess = ptv.getProcessTask();
+                            String idOfIncProcess = kb.getIDofTask(incProcess);
+                            idsOfIncProcesses.add(idOfIncProcess);
+                        }
+
+
+
+//                        String message2 = "{\"type\":\"highlight-incapable-tasks\",\"values\":{\"id\":\""+id+"\",\"task\":\""+productionTaskQueue.peek()+"\", \"incProcesses\":"+gson.toJson(idsOfIncProcesses)+"}}";
+//                        UIconn.send(message2);
 
                         myAgent.addBehaviour(new ContractNetInitiator(myAgent, cfp));
                         String msgName = kb.insertACLMessage(cfp);
@@ -475,18 +657,26 @@ public class RobotAgent extends Agent {
                         kb.addConversationToContract(comm.getConversationId());
 
                         try {
+                            System.out.println(ConsoleColors.robot_format() + "Step 1: Fetch Robot Intentions " + ConsoleColors.RESET);
                             intentions = kb.getIntentions();
                         } catch (IOException | OWLOntologyStorageException | OWLOntologyCreationException e) {
-                            System.out.println("Error computing intentions");
+                            System.out.println(ConsoleColors.robot_format() +"Error computing intentions" + ConsoleColors.RESET);
                             throw new RuntimeException(e);
                         }finally {
+                            System.out.println(ConsoleColors.robot_format() + "Check inferred beliefs " + ConsoleColors.RESET);
                             if(intentions.contains(productionTaskQueue.peek())){
+                                try {
+                                    kb.generatePlans(productionTaskQueue.peek());
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
                                 String id1 = kb.getIDofTask(productionTaskQueue.peek());
-                                System.out.println("Planned: " + id1);
                                 sendWSMessage(id1,"planned");
 
+                                System.out.println(ConsoleColors.robot_format() + "New Intention found: " + productionTaskQueue.peek() + ConsoleColors.RESET);
+                                System.out.println(ConsoleColors.robot_format() + "Spawning Jade Intention Behaviour for " + productionTaskQueue.peek() + ConsoleColors.RESET);
 
-                                currentIntention = new Intention(productionTaskQueue.peek());
+                                currentIntention = new Intention(productionTaskQueue.peek(), false);
                                 currentIntention.setBehaviourName(productionTaskQueue.peek() + " Behaviour");
 
                                 myAgent.addBehaviour(currentIntention);
@@ -501,9 +691,51 @@ public class RobotAgent extends Agent {
                     }
                     else if(comm2!=null){
                         System.out.println("Acknowledging Receipt of Collaboration Proposal");
-                        System.out.println(comm2);
-                        kb.updateTaskExecution(productionTaskQueue.remove());
-                        robotState = State.IDLE;
+                        System.out.println(comm2.getContent());
+                        String msgName = kb.insertACLMessage(comm2);
+                        ArrayList<String> operatorCapableClasses = new ArrayList<>();
+
+                        // check if the proposed is acceptable, and if yes then..
+
+                        // TODO: (LATER) check if the capabilities description sent passes successful validation
+
+                        kb.updateWithAchievableAxiom(productionTaskQueue.peek()); //todo(later): also update with Capabilities provided by human
+
+                        // TODO: Generate Plans
+
+                        // 1: Extract the classes of actions by the operator
+                        String desc = comm2.getContent();
+
+                        try {
+                            operatorCapableClasses = kb.extractCapabilityClassOfOperator(desc);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+
+                        try {
+                            kb.generateCollaborativePlans(productionTaskQueue.peek(), operatorCapableClasses, inCapableProcessTasks);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+
+                        ACLMessage reply = comm2.createReply();
+                        reply.setPerformative(ACLMessage.ACCEPT_PROPOSAL);
+                        String[] taskStringArr = comm2.getConversationId().split("_");
+                        String task = taskStringArr[taskStringArr.length-1];
+                        reply.setContent("Acknowledging Proposal to collaborate on " + task + ". Commencing Collaboration. Pay attention to your tasks, role and corresponding collaborative modalities ..");
+                        send(reply);
+
+                        kb.insertACLMessage(reply);
+
+                        kb.addConversationToContract(comm2.getConversationId());
+
+                        currentIntention = new Intention(productionTaskQueue.peek(), true);
+                        currentIntention.setBehaviourName(productionTaskQueue.peek() + " Behaviour");
+
+                        myAgent.addBehaviour(currentIntention);
+
+                        robotState = State.PERFORMING_TASK;
+
                     }
 
                     else if(comm3!=null){
@@ -513,7 +745,7 @@ public class RobotAgent extends Agent {
                             robotState = State.IDLE;
                         }
 
-                    block(3000);
+                    block(500);
             }
         }
 
@@ -521,14 +753,16 @@ public class RobotAgent extends Agent {
         public boolean done() {
             return false;
         }
-    };
+    }
+
+    ;
 
     class CheckForRequestsAndProposals extends CyclicBehaviour {
         private MessageTemplate messageTemplate;
         @Override
         public void action() {
 
-            messageTemplate = MessageTemplate.MatchPerformative(ACLMessage.PROPOSE);
+            messageTemplate = MessageTemplate.and(MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_PROPOSE),MessageTemplate.MatchPerformative(ACLMessage.PROPOSE));
             ACLMessage msg = myAgent.receive(messageTemplate);
             if (msg != null) {
                 System.out.println("[" + myAgent.getAID().getLocalName() + "] Message Received from " + msg.getSender().getLocalName() + ":  " + msg.getContent());
@@ -540,7 +774,7 @@ public class RobotAgent extends Agent {
                 send(reply);
 //                agent.send("[" + myAgent.getAID().getLocalName() + " ]  Sending that I received a message via Websockets to the webserver " + msg.getSender().getLocalName() + ":  " + msg.getContent());
             }
-            messageTemplate = MessageTemplate.MatchPerformative(ACLMessage.REQUEST);
+            messageTemplate = MessageTemplate.and(MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_REQUEST),MessageTemplate.MatchPerformative(ACLMessage.REQUEST));
             msg = myAgent.receive(messageTemplate);
             if (msg != null) {
                 System.out.println("[" + myAgent.getAID().getLocalName() + "] Message Received from " + msg.getSender().getLocalName() + ":  " + msg.getContent());
@@ -566,7 +800,7 @@ public class RobotAgent extends Agent {
 
         @Override
         public void action() {
-            System.out.println("\n\n[" + myAgent.getAID().getLocalName() + " Agent] " + "Checking for O2A Message");
+            System.out.println(ConsoleColors.robot_format() +"\n\n[" + myAgent.getAID().getLocalName() + " Agent] " + "Checking for O2A Message" + ConsoleColors.RESET);
             O2A object = (O2A) myAgent.getO2AObject();
 
 

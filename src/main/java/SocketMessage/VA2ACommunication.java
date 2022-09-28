@@ -18,6 +18,12 @@ public class VA2ACommunication {
 
     private String reply_with;
 
+    public String getLoopbackcontent() {
+        return loopbackcontent;
+    }
+
+    private  String loopbackcontent;
+
     public String getConversation_id() {
         return conversation_id;
     }

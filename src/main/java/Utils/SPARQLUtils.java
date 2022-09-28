@@ -22,6 +22,7 @@ public class SPARQLUtils {
     String pfx_cm = "http://resourcedescription.tut.fi/ontology/capabilityModel";
 
     String pfx_rdfs = "http://www.w3.org/2000/01/rdf-schema";
+    String pfx_owl = "http://www.w3.org/2002/07/owl";
     String separator = "#";
 
     Map<String, String> prefixMap = new HashMap<>();
@@ -34,9 +35,12 @@ public class SPARQLUtils {
         prefixMap.put("sh", pfx_sh);
         prefixMap.put("cm", pfx_cm);
         prefixMap.put("rdfs", pfx_rdfs);
+        prefixMap.put("owl", pfx_owl);
+
+
     }
 
-    String getPrefixes(String... prefixes){
+    public String getPrefixes(String... prefixes){
         StringBuilder str = new StringBuilder("");
 
 
@@ -78,6 +82,22 @@ public class SPARQLUtils {
     String stripNamespace(String prefix, String resource){
         String[] temp = resource.split(separator);
         return temp[temp.length-1];
+
+    }
+
+    String describeCapablitiesQuery(ArrayList<String> capClassList){
+        StringBuilder descClause= new StringBuilder(" DESCRIBE ");
+        for(int i=0; i<capClassList.size(); i++){
+            descClause.append("?cap").append(i).append(" ");
+        }
+        descClause.append("WHERE { ");
+        for(int i=0; i<capClassList.size(); i++){
+            descClause.append("?cap").append(i).append(" a cm:").append(capClassList.get(i)).append(".");
+        }
+
+        descClause.append("}");
+
+        return descClause.toString();
 
     }
 

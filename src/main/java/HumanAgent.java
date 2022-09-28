@@ -1,7 +1,8 @@
-import SocketMessage.GeneralMessage;
-import SocketMessage.UIMessage;
-import SocketMessage.VA2ACommunication;
+import SocketMessage.*;
+import Utils.ConsoleColors;
 import Utils.KnowledgeBase;
+import Utils.ProcessTaskValidation;
+import Utils.SPARQLUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -15,15 +16,22 @@ import jade.lang.acl.MessageTemplate;
 import jade.proto.AchieveREInitiator;
 
 import java.io.IOException;
+import java.io.StringWriter;
+import java.io.Writer;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.Objects;
-import java.util.Queue;
+import java.nio.file.Paths;
+import java.util.*;
 
 import jade.proto.ProposeInitiator;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.jena.query.QueryExecution;
+import org.apache.jena.query.QuerySolution;
+import org.apache.jena.query.ResultSet;
+import org.apache.jena.rdf.model.Model;
+import org.apache.jena.riot.Lang;
+import org.apache.jena.shacl.ValidationReport;
 import org.java_websocket.WebSocket;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
@@ -42,7 +50,7 @@ class WSHumanClient extends WebSocketClient {
     @Override
     public void onOpen(ServerHandshake handshakedata) {
         send("Hello, it is the Operator :)");
-        System.out.println("[" + this.name + "WS] new connection opened");
+        System.out.println(ConsoleColors.operator_format() + "[" + this.name + "WS] new connection opened" + ConsoleColors.RESET);
     }
 
     @Override
@@ -52,7 +60,7 @@ class WSHumanClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
-        System.out.println("[" + this.name + "WS] received message: " + message);
+        System.out.println(ConsoleColors.operator_format() +"[" + this.name + "WS] received message: " + message + ConsoleColors.RESET);
     }
 
     @Override
@@ -71,7 +79,7 @@ public class HumanAgent extends Agent {
     WebSocket UIconn;
     WebSocketClient WShuman;
     Gson gson = new Gson();
-    KnowledgeBase kb = new KnowledgeBase("/home/robolab/Downloads/productCapO.rdf","/home/robolab/Documents/DatasetOperator", 3001);
+    KnowledgeBase kb = new KnowledgeBase("/home/robolab/Downloads/productCapOv3.rdf","/home/robolab/Documents/DatasetOperator", 3001, ConsoleColors.operator_kb());
 
     Queue<String> checkedQueue = new LinkedList<String>();
 
@@ -80,10 +88,9 @@ public class HumanAgent extends Agent {
     }
 
     public void setup() {
-        System.out.println("Hello from Human Jade Agent");
-        System.out.println("My local name is " + getAID().getLocalName());
-        System.out.println("My GUID is " + getAID().getName());
-        System.out.println("");
+        System.out.println(ConsoleColors.operator_format() + "Hello from Human Jade Agent" + ConsoleColors.RESET);
+        System.out.println(ConsoleColors.operator_format() + "My local name is " + getAID().getLocalName() + ConsoleColors.RESET);
+        System.out.println(ConsoleColors.operator_format() + "My GUID is " + getAID().getName() + ConsoleColors.RESET);
 
         Object[] args = getArguments();
         UIconn = (WebSocket) args[0];  //if you need connection directly to the UI (untested)
@@ -105,12 +112,12 @@ public class HumanAgent extends Agent {
 
         addBehaviour(new HandleProposals());
         addBehaviour(new getUIWSObj());  // adds CheckForO2A() afterwards
+        addBehaviour(new HandleCollaborations());
 //        addBehaviour(new HandleInform());
 //        addBehaviour(new UpdatingIntentions()); // ?commented to debug
-        addBehaviour(new Desire());
+//        addBehaviour(new Desire()); //commented for debugging
 //        addBehaviour(new CheckForO2A());
-//        addBehaviour(new CheckForMessages()); //commented out as this was interfereing with the interaction protocols
-
+//        addBehaviour(new CheckForMessages()); //commented out as this was interfering with the interaction protocols
 
     }
     private void sendWSMessage(String id, String status){
@@ -128,8 +135,8 @@ public class HumanAgent extends Agent {
             if (UIconn != null) {
 //                UIconn = (WebSocket) myAgent.getO2AObject();
 
-                System.out.println("[Operator getUIWSObj Beh] Got UI WS Object");
-                UIconn.send("{\"message\" : \"[Robot Agent] UI Websocket connection established\"}");
+                System.out.println(ConsoleColors.operator_format() +"[Operator getUIWSObj Beh] Got UI WS Object" + ConsoleColors.RESET);
+                UIconn.send("{\"message\" : \"[Operator Agent] UI Websocket connection established\"}");
 
                 addBehaviour(new CheckForO2A());
                 done = true;
@@ -161,7 +168,7 @@ public class HumanAgent extends Agent {
                     // check if checked before if not check for capability and insert isAchievableWithCap
                     if (!checkedQueue.contains(currentTask)) {
 
-                        ArrayList<String> inCapableTasks = kb.checkCapabilityOfProductionTask(currentTask);
+                        Map<String, ProcessTaskValidation> inCapableTasks = kb.checkCapabilityOfProductionTask(currentTask);
                         System.out.println("[Operator] " + currentTask + " isCapable? : " + inCapableTasks.size()); // true if size=0
                         checkedQueue.add(currentTask);
                     }
@@ -198,7 +205,7 @@ public class HumanAgent extends Agent {
         public void action() {
             ACLMessage msg = myAgent.receive(mt);
             if(msg!=null){
-                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + "Received Proposal Message from " + msg.getSender().getLocalName());
+                System.out.println(ConsoleColors.operator_format() + "[" + myAgent.getAID().getLocalName() + " Agent] " + "Received Proposal Message from " + msg.getSender().getLocalName() + ConsoleColors.RESET);
                 VA2ACommunication _resMsg = new VA2ACommunication(msg.getSender().getLocalName(), myAgent.getAID().getLocalName() , //2nd Arg=> if the message is received by Operator, receiver = Operator
                         "Proposal from Robot", msg.getContent(),  ACLMessage.getPerformative(msg.getPerformative()), msg.getProtocol(),
                         msg.getConversationId(), msg.getReplyWith(), msg.getInReplyTo()); // AGAIN A CUSTOM MAP FOR CA?
@@ -220,6 +227,117 @@ public class HumanAgent extends Agent {
         }
     }
 
+    class HandleCollaborations extends CyclicBehaviour {
+        // To handle all messages with CFP IP to forward to UI
+
+        @Override
+        public void action() {
+
+            MessageTemplate mt1 = MessageTemplate.and(MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET),MessageTemplate.MatchPerformative(ACLMessage.CFP));
+            ACLMessage msg1 = myAgent.receive(mt1);
+
+            ArrayList<String> processTasks = new ArrayList<>();
+
+            MessageTemplate mt2 = MessageTemplate.and(MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET),MessageTemplate.MatchPerformative(ACLMessage.ACCEPT_PROPOSAL));
+            ACLMessage msg2 = myAgent.receive(mt2);
+
+            ArrayList<ProcessTaskValidation> processTaskValidations = new ArrayList<>();
+            if(msg1!=null){
+
+                kb.insertACLMessage(msg1);
+
+                String content = msg1.getContent(); // does not work with many process tasks, convert to array?
+                System.out.println("Content: " + content);
+
+//                List<String> ptList = new ArrayList<String>(Arrays.asList(content.split(",")));
+
+                CharSequence sequence = "}, {"; // this sequence indicates multiple process tasks (as joined while sending from robot)
+
+                if(content.contains(sequence)){
+                    //more than one process tasks have failed
+                    System.out.println("Damn more than one process tasks have failed");
+
+                }
+                else{
+                    // only one process task has failed. Note atleast one process task will have failed otherwise the
+                    // agent wouldnt initiate a call for proposal to begin with.
+                    ProcessTaskValidation processTaskValidation = gson.fromJson(content,  ProcessTaskValidation.class);
+                    processTaskValidations.add(processTaskValidation);
+                    String processTask =processTaskValidation.getProcessTask();
+                    ArrayList<String> failedActionCaps = processTaskValidation.getFailedActionCapClasses();
+                    processTasks.add(processTask);
+
+
+
+
+                    // validate with the process task
+
+
+                }
+
+                // fetch production Task from conv id
+
+                String[] taskStringArr = msg1.getConversationId().split("_");
+                String prodTask = taskStringArr[taskStringArr.length-1];
+
+                // check own capability to perform the communicated failed actions of the process task
+
+                //  a. Describe all failedactioncaps instances as one model
+
+                Model requestedCapDescriptions = kb.describeResquestedCaps(processTaskValidations);
+                //  b. validate the process task
+                Writer writer = new StringWriter();
+                requestedCapDescriptions.write(writer, "turtle");
+
+                try {
+
+                    // check if the described instances of capabilities  pass the validation for all requested incapable processes
+                    boolean conforms = kb.validateRequestedProcessTasks(requestedCapDescriptions.getGraph(), processTaskValidations);
+
+                    if(conforms){
+                        System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + " Validated the all requested  incapabilities are possesed. Proceeding to propose.");
+
+//                        ACLMessage prop = msg1.createReply();
+//                        prop.setContent(requestedCapDescriptions.toString());
+//                        send(prop);
+
+                        // TODO: Send to the left drawer, the process and actions that's the operators responsibility to make necessary changes
+
+                        String uiMsg = "Collaboration Needed for process "+ StringUtils.join(processTasks, ", ")+" for Production Task: " + prodTask +". ";
+
+                        // send message to UI (and open left drawer)
+
+                        System.out.println("Debug Sending data: " + requestedCapDescriptions.toString());
+                        UIMessage uiMessage = new UIMessage(ACLMessage.getPerformative(msg1.getPerformative()), msg1.getSender().getLocalName(), uiMsg, msg1.getProtocol(), msg1.getConversationId(), msg1.getReplyWith(), msg1.getInReplyTo(), writer.toString());
+                        GeneralMessage gm = new GeneralMessage("im-message", new JsonParser().parse(gson.toJson(uiMessage)).getAsJsonObject());
+                        UIconn.send(gson.toJson(gm));
+
+
+
+                    }
+                } catch (URISyntaxException e) {
+                    throw new RuntimeException(e);
+                }finally {
+
+                }
+                //  c. if conforms send the description back as message to the requesting agent.
+
+
+
+
+            }
+            else if(msg2!=null){
+                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + "Acknowledging acceptance of collaboration proposal");
+                kb.insertACLMessage(msg2);
+
+            }
+            else {
+                block();
+            }
+
+        }
+    }
+
     class HandleInform extends CyclicBehaviour {
         public HandleInform(MessageTemplate mt) {
             this.mt = mt;
@@ -231,10 +349,10 @@ public class HumanAgent extends Agent {
         public void action() {
             ACLMessage msg = myAgent.receive(mt);
             if(msg!=null){
-                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + "Received Inform Message from " + msg.getSender().getLocalName());
+                System.out.println(ConsoleColors.operator_format() + "[" + myAgent.getAID().getLocalName() + " Agent] " + "Received Inform Message from " + msg.getSender().getLocalName() + ConsoleColors.RESET);
                 String[] taskStringArr = msg.getConversationId().split("_");
                 String task = taskStringArr[taskStringArr.length-1];
-                System.out.println("For Task: " + task);
+                System.out.println(ConsoleColors.operator_format() +"For Task: " + task + ConsoleColors.RESET);
                 String infMsg = kb.insertACLMessage(msg);
                 kb.addInformMessageToContract(infMsg);
                 kb.updateTaskExecution(task);
@@ -283,7 +401,7 @@ public class HumanAgent extends Agent {
         // O2A is only put by UI, so this behaviour may thought to be dedicated to handle UI Requests
         @Override
         public void action() {
-            System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + "Checking for O2A Message");
+            System.out.println(ConsoleColors.operator_format() + "[" + myAgent.getAID().getLocalName() + " Agent] " + "Checking for O2A Message" + ConsoleColors.RESET);
             GeneralMessage object = (GeneralMessage) myAgent.getO2AObject();
 
             Gson gson = new Gson();
@@ -292,8 +410,8 @@ public class HumanAgent extends Agent {
             if (object != null) {
 
                 System.out.println("");
-                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + " O2A Message type: " + object.getType());
-                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + " O2A Message value: " + object.getValue().toString());
+                System.out.println(ConsoleColors.operator_format() + "[" + myAgent.getAID().getLocalName() + " Agent] " + " O2A Message type: " + object.getType() + ConsoleColors.RESET);
+                System.out.println(ConsoleColors.operator_format() + "[" + myAgent.getAID().getLocalName() + " Agent] " + " O2A Message value: " + object.getValue().toString() + ConsoleColors.RESET);
 //                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + " O2A Message receiver " + object.getReceiver());
 //                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + " O2A Message context " + object.getContext());
 //                System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + " O2A Message payload " + object.getPayload());
@@ -301,10 +419,29 @@ public class HumanAgent extends Agent {
 
                 if (Objects.equals(object.getType(), "agent_communication")) {
                     VA2ACommunication a2aMsg = gson.fromJson(object.getValue().toString(), VA2ACommunication.class);
-                    System.out.println("[" + myAgent.getAID().getLocalName() + " Agent] " + " agent_communication message's CA: " + a2aMsg.getCommunicativeAct());
+//                    System.out.println(ConsoleColors.operator_format() +"[" + myAgent.getAID().getLocalName() + " Agent] " + " agent_communication message's CA: " + a2aMsg.getCommunicativeAct() + ConsoleColors.RESET);
+
+                    if(Objects.equals(a2aMsg.getInteractionProtocol(),"fipa-contract-net")){ // this is only used for collaborations
+                        if(Objects.equals(a2aMsg.getCommunicativeAct(),"PROPOSE")){ // this is a response to a call for proposal
+
+                            System.out.println("[Debug] checking for desc" + a2aMsg.getLoopbackcontent());
+
+                            ACLMessage requestMsg = new ACLMessage(ACLMessage.PROPOSE);
+                            requestMsg.setSender(myAgent.getAID());
+                            requestMsg.addReceiver(new AID(a2aMsg.getReceiver(), AID.ISLOCALNAME));
+                            requestMsg.setProtocol(a2aMsg.getInteractionProtocol());
+                            requestMsg.setConversationId(a2aMsg.getConversation_id());
+                            requestMsg.setInReplyTo(a2aMsg.getIn_reply_to());
+                            requestMsg.setContent(a2aMsg.getLoopbackcontent());
+
+                            kb.insertACLMessage(requestMsg);
+                            send(requestMsg);
+                        }
+
+                    }
 
                     //  TODO: Refactor lot of redundant logic
-                    if(Objects.equals(a2aMsg.getCommunicativeAct(), "REQUEST")||Objects.equals(a2aMsg.getCommunicativeAct(), "PROPOSE")||Objects.equals(a2aMsg.getCommunicativeAct(), "INFORM")){
+                    else if(Objects.equals(a2aMsg.getCommunicativeAct(), "REQUEST")||Objects.equals(a2aMsg.getCommunicativeAct(), "PROPOSE")||Objects.equals(a2aMsg.getCommunicativeAct(), "INFORM")){
                         if(Objects.equals(a2aMsg.getContext(),"Request Collaborative Assembly")) {// currently only expecting to be trigerred the Request Collaborative Assembly button
                             ACLMessage requestMsg = new ACLMessage(ACLMessage.REQUEST);
                             requestMsg.addReceiver(new AID(a2aMsg.getReceiver(), AID.ISLOCALNAME));
@@ -336,7 +473,7 @@ public class HumanAgent extends Agent {
                                         System.out.println(message.getContent()); // transform to appropriate JSON object as you have on receive message function for the robot and you need it for multiple scenarios
                                         System.out.println(" ");
 
-                                        UIMessage uiMessage = new UIMessage(ACLMessage.getPerformative(message.getPerformative()), message.getSender().getLocalName(), message.getContent(),message.getProtocol(), message.getConversationId(), message.getReplyWith(), message.getInReplyTo());
+                                        UIMessage uiMessage = new UIMessage(ACLMessage.getPerformative(message.getPerformative()), message.getSender().getLocalName(), message.getContent(),message.getProtocol(), message.getConversationId(), message.getReplyWith(), message.getInReplyTo(),"");
                                         GeneralMessage gm = new GeneralMessage("im-message", new JsonParser().parse(gson.toJson(uiMessage)).getAsJsonObject());
                                         UIconn.send(gson.toJson(gm));
 
@@ -356,7 +493,7 @@ public class HumanAgent extends Agent {
                                 String task = taskStringArr[taskStringArr.length-1];
                                 System.out.println("[Operator] Checking Capability for Task: "+ task);
 
-                                ArrayList<String> inCapableProcessTasks = kb.checkCapabilityOfProductionTask(task);
+                                Map<String, ProcessTaskValidation> inCapableProcessTasks = kb.checkCapabilityOfProductionTask(task);
 
                                 if(inCapableProcessTasks.size()==0){
                                     ACLMessage requestMsg = new ACLMessage(ACLMessage.PROPOSE);
@@ -373,7 +510,7 @@ public class HumanAgent extends Agent {
                                             System.out.println(message.getContent()); // transform to appropriate JSON object as you have on receive message function for the robot and you need it for multiple scenarios
                                             System.out.println(" ");
 
-                                            UIMessage uiMessage = new UIMessage(ACLMessage.getPerformative(message.getPerformative()), message.getSender().getLocalName(), message.getContent(),message.getProtocol(), message.getConversationId(), message.getReplyWith(), message.getInReplyTo());
+                                            UIMessage uiMessage = new UIMessage(ACLMessage.getPerformative(message.getPerformative()), message.getSender().getLocalName(), message.getContent(),message.getProtocol(), message.getConversationId(), message.getReplyWith(), message.getInReplyTo(),"");
                                             GeneralMessage gm = new GeneralMessage("im-message", new JsonParser().parse(gson.toJson(uiMessage)).getAsJsonObject());
                                             UIconn.send(gson.toJson(gm));
 
@@ -385,7 +522,7 @@ public class HumanAgent extends Agent {
                                 else{
 
                                     UIMessage uiMessage = new UIMessage("Notify", "Belief", "Capability to perform task " + task + "not found",
-                                            "Notify", "None", "None", "None");
+                                            "Notify", "None", "None", "None","");
                                     GeneralMessage gm = new GeneralMessage("im-message", new JsonParser().parse(gson.toJson(uiMessage)).getAsJsonObject());
                                     UIconn.send(gson.toJson(gm));
                                 }
@@ -433,8 +570,27 @@ public class HumanAgent extends Agent {
                     else if (Objects.equals(a2aMsg.getContext(), "Something else")) {
                         System.out.println("Do Something");
                     }
+
                 }
-            } else {
+                else if (Objects.equals(object.getType(), "process_description")) {
+
+                    ProcessDescription val = gson.fromJson(object.getValue().toString(), ProcessDescription.class);
+
+                    System.out.println("extracted " +  val.getProcessName());
+
+                    ArrayList<PrimitveTask> desc = kb.getProcessDescription(val.getProcessName());
+
+                    String desc_json = gson.toJson(desc);
+
+                    System.out.println(desc_json);
+
+
+
+                    String  uiMessage = "{\"type\":\"show-process-description\",\"values\":"+desc_json+"}";
+                    UIconn.send(uiMessage);
+
+                }
+            }  else  {
                 block();
             }
         }

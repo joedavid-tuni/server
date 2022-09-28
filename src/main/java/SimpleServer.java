@@ -1,4 +1,5 @@
 import java.awt.*;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -260,12 +261,11 @@ public class SimpleServer extends WebSocketServer {
 
                 else if (Objects.equals(a2aMsg.getReceiver(), "Operator")){ //if operator is the receiver this has to be a message from some
                     WebSocket uiConn = sessionMap.get("InteractionUI"); //  agent to the JADE human agent that has to be displayed on the UI
-                     UIMessage uiMessage = new UIMessage(a2aMsg.getCommunicativeAct(), a2aMsg.getSender(), a2aMsg.getPayload(),a2aMsg.getInteractionProtocol(), a2aMsg.getConversation_id(), a2aMsg.getReply_with(), a2aMsg.getIn_reply_to());
+                     UIMessage uiMessage = new UIMessage(a2aMsg.getCommunicativeAct(), a2aMsg.getSender(), a2aMsg.getPayload(),a2aMsg.getInteractionProtocol(), a2aMsg.getConversation_id(), a2aMsg.getReply_with(), a2aMsg.getIn_reply_to(),"");
                     GeneralMessage gm = new GeneralMessage("im-message", new JsonParser().parse(gson.toJson(uiMessage)).getAsJsonObject());
                     uiConn.send(gson.toJson(gm));
 
                 }
-
                 } catch (StaleProxyException e) {
                     e.printStackTrace();
                 }
@@ -277,6 +277,7 @@ public class SimpleServer extends WebSocketServer {
 
                 // store all session in map here
                 if(Objects.equals(val.getSender(), "InteractionUI")){
+                    System.out.println("Identification web socket message received from Interaction UI");
                     sessionMap.put(val.getSender(), conn);
                     try {
 //                        HumanAgent.putO2AObject(UIObj,false);
@@ -288,7 +289,15 @@ public class SimpleServer extends WebSocketServer {
                 }
                 // TODO: else if for Robot and Operator
             }
+        }
 
+        else if (msg.getType().equals("process_description")){
+
+            try {
+                HumanAgent.putO2AObject(msg,false);
+            } catch (StaleProxyException e) {
+                throw new RuntimeException(e);
+            }
 
         }
 
@@ -431,7 +440,16 @@ public class SimpleServer extends WebSocketServer {
             IntrospectorAgent.start();
             rma.start();
 
+            Process p = java.lang.Runtime.getRuntime().exec(new String[]{"google-chrome","http://localhost:3000/"});
+            p.waitFor();
+            System.out.println("MR Application launched");
+
         } catch (StaleProxyException e) {
+            throw new RuntimeException(e);
+        }
+        catch (IOException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
 
