@@ -116,33 +116,6 @@ public class SimpleServer extends WebSocketServer {
             }
     );
 
-
-    // Rigid Body Transformation  (KinectCalibration => PnP.cpp) (after rotating X and Z by 180deg)
-//    private SimpleMatrix _RT = new SimpleMatrix(
-//            new double[][]{
-//                    new double[] {0.99973911, 0.0023694111 , -0.022717459, 55.749138},
-//                    new double[] {-0.0073618814, 0.97495246, -0.22229147, 11.060492},
-//                    new double[] {0.021621743, 0.22240072, 0.97471553, 116.04071},
-//            }
-//    );
-
-    // Rigid Body Transformation  (KinectCalibration => PnP.cpp) (after rotating  Z by 90deg)
-//    private SimpleMatrix _RT = new SimpleMatrix(
-//            new double[][]{
-//                    new double[] {0.0023694111 ,0.99973911,  0.022717459, 55.749138},
-//                    new double[] {0.97495246, -0.0073618814, 0.22229147, 11.060492},
-//                    new double[] {0.22240072, 0.021621743,  -0.97471553, 116.04071},
-//            }
-//    );
-////     with R not transposed in PnP.cpp (R=R.t())
-//    private SimpleMatrix _RT = new SimpleMatrix(
-//            new double[][]{
-//                    new double[] {-0.99973911, 0.0073618814 , -0.021621743, 60.782368},
-//                    new double[] {0.0023694111, 0.97495246, 0.22240072, 11.338917},
-//                    new double[] {0.022717459, 0.22229147, -0.97471553, 113.4578},
-//            }
-//    );
-
     Gson gson = new Gson();
 
 
