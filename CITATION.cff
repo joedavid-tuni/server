@@ -21,7 +21,7 @@ preferred-citation:
     orcid: "https://orcid.org/0000-0003-2729-489X"
   doi: "https://doi.org/10.1016/j.jmsy.2023.07.013"
   journal: "Journal of Manufacturing Systems"
-  month: 9
+  month: 8
   start: 359 # First page number
   end: 381 # Last page number
   title: "Deploying OWL Ontologies for Semantic Mediation of Mixed-Reality Interactions for Human-Robot Collaborative Assembly"
