@@ -4,11 +4,9 @@ authors:
 - family-names: "David"
   given-names: "Joe"
   orcid: "https://orcid.org/0000-0003-4651-0164"
-title: "Interaction UI"
+title: "NXAgent"
 version: 0.1.0
-doi: 10.5281/zenodo.1234
-date-released: 2023-03-30
-url: "https://permanent.link/to/jd-doctoral-dissertation/interaction-ui"
+date-released: 2023-09-01
 preferred-citation:
   type: article
   authors:
@@ -21,12 +19,11 @@ preferred-citation:
   - family-names: "Lobov"
     given-names: "Andrei"
     orcid: "https://orcid.org/0000-0003-2729-489X"
-  doi: "10.0000/00000"
+  doi: "https://doi.org/10.1016/j.jmsy.2023.07.013"
   journal: "Journal of Manufacturing Systems"
   month: 9
-  start: 0 # First page number
-  end: 0 # Last page number
+  start: 359 # First page number
+  end: 381 # Last page number
   title: "Deploying OWL Ontologies for Semantic Mediation of Mixed-Reality Interactions for Human-Robot Collaborative Assembly"
-  issue: 0
-  volume: 0
+  volume: 70
   year: 2023
